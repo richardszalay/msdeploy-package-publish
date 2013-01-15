@@ -1,0 +1,92 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0" DefaultTargets="Test">
+
+	<PropertyGroup>
+    <OutPath>$(MSBuildThisFileDirectory)Out\</OutPath>
+    <TempPath>$(OutPath)Temp</TempPath>
+		<DestPath>$(OutPath)Dest</DestPath>
+		<PackagePublishTargetsFile>$(MSBuildThisFileDirectory)..\Community.Web.Publishing.Deploy.PackageDeploy.targets</PackagePublishTargetsFile>
+		<PackageSource>$(MSBuildThisFileDirectory)Source</PackageSource>
+    <PackagePath>$(OutPath)Package.zip</PackagePath>
+
+    <AppHostConfigPath>$(OutPath)</AppHostConfigPath>
+
+    <IisExpressSiteName>msdeploypackagepublish.testtarget</IisExpressSiteName>
+	</PropertyGroup>
+
+  <PropertyGroup>
+    <!--Unless specified otherwise, the tools will go to HKLM\SOFTWARE\Microsoft\IIS Extensions\MSDeploy\1 to get the installpath for msdeploy.exe.-->
+    <!-- We now use  GetMSDeployInstalledVersionPath target to get the installed msdeploy versions -->
+    <MSDeployPath Condition="'$(MSDeployPath)'==''">$(Registry:HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\IIS Extensions\MSDeploy\3@InstallPath)</MSDeployPath>
+    <MSDeployPath Condition="'$(MSDeployPath)'==''">$(Registry:HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\IIS Extensions\MSDeploy\2@InstallPath)</MSDeployPath>
+    <MSDeployPath Condition="'$(MSDeployPath)'==''">$(Registry:HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\IIS Extensions\MSDeploy\1@InstallPath)</MSDeployPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--Unless specified otherwise, the tools will go to HKLM\SOFTWARE\Microsoft\IIS Extensions\MSDeploy\1 to get the installpath for msdeploy.exe.-->
+    <!-- We now use  GetMSDeployInstalledVersionPath target to get the installed msdeploy versions -->
+    <IisExpressPath Condition="'$(IisExpressPath)'==''">$(Registry:HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\IISExpress\8.0@InstallPath)</IisExpressPath>
+    <IisExpressPath Condition="'$(IisExpressPath)'==''">$(Registry:HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\IISExpress\7.5@InstallPath)</IisExpressPath>
+    <IisExpressPath Condition="'$(IisExpressPath)'==''">$(Registry:HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\IISExpress\7.0@InstallPath)</IisExpressPath>
+  </PropertyGroup>
+	
+	<Target Name="CreateDirectories" BeforeTargets="Test">
+		<RemoveDir Directories="$(OutPath)" />
+		<MakeDir Directories="$(TempPath);$(DestPath)" />
+	</Target>
+	
+	
+	<Target Name="CreatePackage" BeforeTargets="Test" DependsOnTargets="CreateDirectories">
+    <Exec Command="&quot;$(MSDeployPath)msdeploy.exe&quot; -verb:sync -source:contentPath=&quot;$(PackageSource)&quot; -dest:package=&quot;$(PackagePath)&quot; -declareParam:name=&quot;IIS Web Application Name&quot;,kind=providerPath,scope=contentPath,match=.*" />
+	</Target>
+
+  <Target Name="CreateIIsExpressSite" BeforeTargets="Test" DependsOnTargets="CreateDirectories">
+    <Exec Command="&quot;$(IisExpressPath)appcmd&quot; delete site &quot;$(IisExpressSiteName)&quot;" IgnoreExitCode="true" />
+    <Exec Command="&quot;$(IisExpressPath)appcmd&quot; add site /name:&quot;$(IisExpressSiteName)&quot; /bindings:http/:12345:localhost /physicalpath:&quot;$(DestPath)&quot;" />
+  </Target>
+  
+  <UsingTask TaskName="Assert" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.v4.0.dll">
+    <ParameterGroup>
+      <Text ParameterType="System.String" Required="true" />
+      <Assertion ParameterType="System.Boolean" Required="true" />
+      <Negate ParameterType="System.Boolean" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+string messagePrefix = "[ASSERTION] " + Text;
+
+bool assertionValue = Assertion;
+
+if (Negate) Assertion = !Assertion;
+
+if (Assertion)
+{
+	Log.LogMessage(MessageImportance.High, messagePrefix + " (passed)");
+}
+else
+{
+	Log.LogError(messagePrefix + " (failed)");
+}
+]]>
+      </Code>
+    </Task>
+  </UsingTask>
+
+  <UsingTask TaskName="TokenReplace" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.v4.0.dll">
+    <ParameterGroup>
+      <Path ParameterType="System.String" Required="true" />
+      <Token ParameterType="System.String" Required="true" />
+      <Replacement ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+string content = File.ReadAllText(Path);
+content = content.Replace(Token, Replacement);
+File.WriteAllText(Path, content);
+
+]]>
+      </Code>
+    </Task>
+  </UsingTask>
+</Project>

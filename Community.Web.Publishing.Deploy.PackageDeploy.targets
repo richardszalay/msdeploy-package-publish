@@ -1,0 +1,175 @@
+<!--
+This build script supports deployment of a website package to a publish profile without rebuilding the project or package
+
+If placed in the same directory as a web project that uses publish profiles, the following arguments will need to be defined:
+
+Convention based required arguments:
+  PublishProfile: the name of the publish profile (or a path to a pubxml file if using non-convention based)
+  Configuration: Debug/Release
+
+Convention based optional arguments:
+  VisualStudioVersion: Property specific to this build script that determines which WPP version to use (v10.5 [default] for VS2010+Azure updates, v11.0 for VS2012)
+  WebPublishPipelineProjectName:
+  WebPublishPipelineProjectDirectory: The root to the web project directory if this build script isn't there and PublishProfile isn't a path (to auto-detect publish profile directory)
+
+Non-convention based optional arguments:
+  PackageFileName: The full path to the website package zip
+  UseDeclareParametersXMLInMsDeploy: true to save the parameters to a file and then use that file; false to inline the parameters
+  UseMsDeployExe: true to use msdeploy.exe; false to use the VS MSBuild task
+
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0" DefaultTargets="WebPublish">
+
+  <PropertyGroup>
+	<!-- IMPL: Set this to 11.0 to use VS2012 -->
+	<VisualStudioVersion>10.0</VisualStudioVersion>
+  </PropertyGroup>
+  
+  <PropertyGroup>
+	<MsDeployPreview Condition="'$(MsDeployPreview)' == ''">false</MsDeployPreview>
+  
+	<!-- IMPL: Declared in Microsoft.Web.Publishing.targets, but we need to declare PublishProfileRootFolder before it's imported -->
+	<WebPublishPipelineProjectDirectory Condition="'$(WebPublishPipelineProjectDirectory)'==''">$(MSBuildProjectDirectory)</WebPublishPipelineProjectDirectory>
+	
+	<!-- IMPL: Usually detected by ".csproj" vs ".vbproj", but PackageDeploy.build is neither -->
+	<PublishProfileRootFolder Condition="'$(PublishProfileRootFolder)' == '' and Exists('$(WebPublishPipelineProjectDirectory)\My Project\PublishProfiles')">$(WebPublishPipelineProjectDirectory)\My Project\PublishProfiles</PublishProfileRootFolder>
+	<PublishProfileRootFolder Condition="'$(PublishProfileRootFolder)' == '' and Exists('$(WebPublishPipelineProjectDirectory)\Properties\PublishProfiles')">$(WebPublishPipelineProjectDirectory)\Properties\PublishProfiles</PublishProfileRootFolder>
+  </PropertyGroup>
+
+  <!-- IMPL: Select the correct version of Microsoft.WebApplication.targets (usually done by the csproj via WebApplication.targets) -->
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\WebApplications\Microsoft.WebApplication.targets" />
+
+  <PropertyGroup>
+    <WebPublishDependsOn>
+      MSDeployPackagePublish;
+    </WebPublishDependsOn>
+  </PropertyGroup>
+  
+
+  <!-- FIX: MSDeployPublish depends on building the package (can be skipped by clearing MSDeployPublishDependsOn) -->
+  <!-- IMPL: ImportPublishingParameterValues transforms all the MSDeployParameterValue+ParameterValue to MsDeployDeclareParameters+Value -->
+  <Target Name="MSDeployPackagePublish" Condition="'$(PublishProfile)' != ''" DependsOnTargets="ImportPublishingParameterValues">
+
+    <MapUriToIisWebServer Condition="('$(MSDeployPublishMethod)'=='INPROC') And ('$(MsDeployServiceUrl)' != '') "
+                          ProjectIisUrl="$(MsDeployServiceUrl)"
+                          UseIISExpressHintFlag="true">
+      <Output TaskParameter="WebServerAppHostConfigDirectory" PropertyName="_MSDeployDestinationWebServerAppHostConfigDirectory"  />
+      <Output TaskParameter="WebServerDirectory" PropertyName="_MSDeployDestinationWebServerDirectory"  />
+      <Output TaskParameter="WebServerManifest" PropertyName="_MSDeployDestinationWebServerManifest"  />
+      <Output TaskParameter="MatchScore" PropertyName="_MatchScore"  />
+    </MapUriToIisWebServer>
+
+    <PropertyGroup>
+	    <_PublishMsDeployServiceUrl>$(MsDeployServiceUrl)</_PublishMsDeployServiceUrl>
+	    <_PublishMsDeployServiceUrl Condition="('$(MSDeployPublishMethod)'=='INPROC')"></_PublishMsDeployServiceUrl>
+
+      <!--Property used when we invoke msdeploy process for publish-->
+      <MsDeployDoNotDeleteRule Condition="$(SkipExtraFilesOnServer)">DoNotDeleteRule</MsDeployDoNotDeleteRule>
+	  </PropertyGroup>
+
+	  <ItemGroup>
+	    <!-- IMPL: Always uses "package" source -->
+	    <MsDeploySourceProviderSetting Remove="@(MsDeploySourceProviderSetting)" />
+	    <MsDeploySourceProviderSetting Include="package">
+		  <Path>@(_MSDeployPackageFile->'%(FullPath)')</Path>
+		  <EncryptPassword>$(DeployEncryptKey)</EncryptPassword>
+		  <WebServerAppHostConfigDirectory>$(_MSDeploySourceWebServerAppHostConfigDirectory)</WebServerAppHostConfigDirectory>
+		  <WebServerManifest>$(_MSDeploySourceWebServerManifest)</WebServerManifest>
+		  <WebServerDirectory>$(_MSDeploySourceWebServerDirectory)</WebServerDirectory>
+	    </MsDeploySourceProviderSetting>
+	  
+	    <MsDeployDestinationProviderSetting Remove="@(MsDeployDestinationProviderSetting)" />
+	    <MsDeployDestinationProviderSetting Include="auto">
+		    <Path></Path>
+		    <ComputerName>$(_PublishMsDeployServiceUrl)</ComputerName>
+		    <UserName>$(UserName)</UserName>
+		    <Password>$(Password)</Password>
+		    <EncryptPassword>$(DeployEncryptKey)</EncryptPassword>
+		    <IncludeAcls>False</IncludeAcls>
+		    <AuthType>$(AuthType)</AuthType>
+		    <WebServerAppHostConfigDirectory>$(_MSDeployDestinationWebServerAppHostConfigDirectory)</WebServerAppHostConfigDirectory>
+		    <WebServerManifest>$(_MSDeployDestinationWebServerManifest)</WebServerManifest>
+		    <WebServerDirectory>$(_MSDeployDestinationWebServerDirectory)</WebServerDirectory>
+	    </MsDeployDestinationProviderSetting>
+	  </ItemGroup>
+
+	  <!--Debug/Diagnostic message is not localized-->
+	  <Message Text="MSDeployPublish MsDeploySourceProviderSetting is @(MsDeploySourceProviderSetting)" Condition="$(EnablePackageProcessLoggingAndAssert)" />
+	  <Message Text="MSDeployPublish MsDeployDestinationProviderSetting is @(MsDeployDestinationProviderSetting)" Condition="$(EnablePackageProcessLoggingAndAssert)"/>
+
+	  <!--<ExportParametersFile
+	    Condition="!$(UseDeclareParametersXMLInMsDeploy) And $(EnablePackageProcessLoggingAndAssert)"
+	    Parameters="@(MsDeployDeclareParameters)"
+	    DeclareSetParameterFile="$(PackageLogDir)\MSDeployPublish.parameters.xml"
+	    GenerateFileEvenIfEmpty="True"
+	    />-->
+
+	  <!--First delete the ParameterFile-->
+	  <Delete Files="$(PublishParametersFile)"  Condition="Exists($(PublishParametersFile))" ContinueOnError="true"/>
+
+	  <PropertyGroup>
+	    <_VsPublishParametersFile></_VsPublishParametersFile>
+	    <_VsPublishParametersFile Condition="$(UseDeclareParametersXMLInMsDeploy) and '$(_VsPublishParametersFile)'==''">$(PublishParametersFile)</_VsPublishParametersFile>
+	  </PropertyGroup>
+
+    <ItemGroup>
+      <!-- IMPL: Utilising the real version of this has way too much baggage (simplifying it could have repercussions, though) -->
+      <MsDeployDeclareParameters Include="$(DeployParameterIISAppName)" Condition="'$(DeployIisAppPath)' != ''">
+		    <Value>$(DeployIisAppPath)</Value>
+	    </MsDeployDeclareParameters>
+    </ItemGroup>
+
+    <!-- FIX: Use SetParameterFile (rather than DeclareSetParameterFile), which isn't used anywehere in Microsoft.Web.Publishing.targets -->
+    <ExportParametersFile
+	    Parameters="@(MsDeployDeclareParameters)"
+	    SetParameterFile="$(PublishParametersFile)"
+	    GenerateFileEvenIfEmpty="True"
+	    Condition="$(UseDeclareParametersXMLInMsDeploy)"
+	    />
+
+	  <ItemGroup Condition="!$(UseDeclareParametersXMLInMsDeploy)">
+	    <_VsPublish_MsDeployDeclareParameters Remove="@(_VsPublish_MsDeployDeclareParameters)" />
+	    <_VsPublish_MsDeployDeclareParameters Include="@(MsDeployDeclareParameters)" />
+	  </ItemGroup>
+
+	  <!-- FIX: Microsoft.Web.Publishing.targets uses "SetParameterItems", which doens't appear to work. This uses SimpleSetParameterItems instead  -->
+	  <VSMSDeploy
+	    Condition="!$(UseMsdeployExe)"
+	    MSDeployVersionsToTry="$(_MSDeployVersionsToTry)"
+	    Source="@(MsDeploySourceProviderSetting)"
+	    Destination="@(MsDeployDestinationProviderSetting)"
+	    DisableLink="$(PublishDisableLinks)"
+	    EnableLink="$(PublishEnableLinks)"
+	    AllowUntrustedCertificate="$(AllowUntrustedCertificate)"
+	    BuildingInsideVisualStudio="$(BuildingInsideVisualStudio)"
+	    SkipExtraFilesOnServer="$(SkipExtraFilesOnServer)"
+	    SkipRuleItems="@(MsDeploySkipRules)"
+	    OptimisticParameterDefaultValue="$(EnableOptimisticParameterDefaultValue)"
+	    SimpleSetParameterItems="@(_VsPublish_MsDeployDeclareParameters)"
+	    ImportSetParametersItems="$(_VsPublishParametersFile)"
+	    RetryAttempts="$(RetryAttemptsForDeployment)"
+	    InvokedByPublish="true"
+	  >
+	    <Output TaskParameter="Result" PropertyName="_PublishResult" />
+	  </VSMSDeploy>
+
+	  <!-- FIX: Microsoft.Web.Publishing.targets uses "SetParameterItems", which doens't appear to work. This uses SimpleSetParameterItems instead  -->
+	  <MSdeploy
+		    Condition="$(UseMsdeployExe)"
+		    Verb="sync"
+		    Source="@(MsDeploySourceProviderSetting)"
+		    Destination="@(MsDeployDestinationProviderSetting)"
+		    DisableLink="$(PublishDisableLinks)"
+		    EnableLink="$(PublishEnableLinks)"
+		    EnableRule="$(MsDeployDoNotDeleteRule)"
+		    AllowUntrusted="$(AllowUntrustedCertificate)"
+		    SkipRuleItems="@(MsDeploySkipRules)"
+		    OptimisticParameterDefaultValue="$(EnableOptimisticParameterDefaultValue)"
+		    SimpleSetParameterItems="@(_VsPublish_MsDeployDeclareParameters)"
+		    ImportSetParametersItems="$(_VsPublishParametersFile)"
+		    RetryAttempts="$(RetryAttemptsForDeployment)"
+		    WhatIf="$(MsDeployPreview)"
+		    ExePath="$(MSDeployPath)" />
+  </Target>
+  
+</Project>

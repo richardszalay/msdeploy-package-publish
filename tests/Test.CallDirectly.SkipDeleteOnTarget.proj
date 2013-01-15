@@ -1,0 +1,19 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0" DefaultTargets="Test">
+
+	<Import Project="Community.Web.Publishing.Deploy.PackageDeploy.Tests.Common.targets" />
+
+  <PropertyGroup>
+    <ProjectPath>$(OutPath)Project</ProjectPath>
+  </PropertyGroup>
+
+	<Target Name="Test">
+		<WriteLinesToFile Lines="" File="$(DestPath)\server.log" />
+    
+		<MSBuild Projects="$(PackagePublishTargetsFile)"
+             Properties="SkipFileDelete=server\.log$;WebPublishPipelineProjectDirectory=$(PackageSource);PublishProfile=InProc-Express-SkipDelete;PackageFileName=$(PackagePath);UseMsDeployExe=true;UseDeclareParametersXMLInMsDeploy=true" />
+
+		<Assert Text="Files should be deployed" Assertion="$([System.IO.File]::Exists('$(DestPath)\web.config'))" />
+		<Assert Text="Skipped file should remain on target" Assertion="$([System.IO.File]::Exists('$(DestPath)\server.log'))" />
+	</Target>
+
+</Project>

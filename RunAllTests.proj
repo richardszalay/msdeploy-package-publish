@@ -1,0 +1,13 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0" DefaultTargets="RunAllTests">
+
+	<ItemGroup>
+		<TestProjects Include="tests\*.proj" />
+	</ItemGroup>
+	
+	<Target Name="RunAllTests">
+	
+		<MSBuild Projects="@(TestProjects)" Targets="Test" />
+	
+	</Target>
+
+</Project>
